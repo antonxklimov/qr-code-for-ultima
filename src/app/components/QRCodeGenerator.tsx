@@ -503,18 +503,6 @@ const QRCodeGenerator = () => {
     }
   };
 
-  // Helper function to get type label
-  const getTypeLabel = (type: ContentType): string => {
-    switch (type) {
-      case 'url': return 'URL';
-      case 'email': return 'Email';
-      case 'phone': return 'Phone';
-      case 'sms': return 'SMS';
-      case 'wifi': return 'WiFi';
-      default: return 'Text';
-    }
-  };
-
   const toggleFileGuide = () => {
     setShowFileGuide(!showFileGuide);
   };
