@@ -723,9 +723,16 @@ const QRCodeGenerator = () => {
             <div className="mb-5">
               <div className="space-y-4 border border-gray-200 rounded-lg p-5 bg-white shadow-sm">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-base font-medium text-gray-800">
-                    {mode === 'batch' ? 'Batch QR Code Generator' : 'Yandex Ultima QR Code Generator'}
-                  </h3>
+                  <div>
+                    <h3 className="text-base font-medium text-gray-800">
+                      {mode === 'batch' ? 'Batch QR Code Generator' : 'Yandex Ultima QR Code Generator'}
+                    </h3>
+                    {mode === 'yandex-ultima' && (
+                      <p className="text-xs text-gray-600 mt-1">
+                        Generates QR codes with the format: https://8jxm.adj.st/addpromocode?adj_t=rf7a0p4_8cgc7kg&ref=qr&code=*promocode*
+                      </p>
+                    )}
+                  </div>
                   <div className="flex space-x-2">
                     <input
                       type="file"
@@ -772,7 +779,11 @@ const QRCodeGenerator = () => {
                       <li>Content will be auto-detected (URLs, email addresses, etc.)</li>
                       <li>Example: each line/row can be a URL, text, email, phone number, etc.</li>
                       {mode === 'yandex-ultima' && (
-                        <li className="text-blue-600 font-medium">Yandex Ultima mode: Each item will be used as a promocode in the URL</li>
+                        <>
+                          <li className="text-blue-600 font-medium">Yandex Ultima mode: Each item will be used as a promocode in the URL</li>
+                          <li className="text-blue-600">URL format: https://8jxm.adj.st/addpromocode?adj_t=rf7a0p4_8cgc7kg&ref=qr&code=*promocode*</li>
+                          <li className="text-blue-600">The *promocode* will be replaced with your actual promocode</li>
+                        </>
                       )}
                     </ul>
                   </div>
