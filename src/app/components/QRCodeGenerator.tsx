@@ -24,6 +24,57 @@ interface BatchQRCode {
   formattedContent: string; // The formatted content based on type
 }
 
+interface LoadingButtonProps {
+  onClick: () => void;
+  isLoading: boolean;
+  disabled?: boolean;
+  variant?: 'primary' | 'danger';
+  className?: string;
+  icon?: React.ReactNode;
+  loadingText?: string;
+  children: React.ReactNode;
+}
+
+const LoadingButton: React.FC<LoadingButtonProps> = ({
+  onClick,
+  isLoading,
+  disabled = false,
+  variant = 'primary',
+  className = '',
+  icon,
+  loadingText = 'Loading...',
+  children
+}) => {
+  const baseStyles = "px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center shadow-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed font-['Helvetica']";
+  const variantStyles = {
+    primary: "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500",
+    danger: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500"
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={isLoading || disabled}
+      className={`${baseStyles} ${variantStyles[variant]} ${className}`}
+    >
+      {isLoading ? (
+        <>
+          <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          {loadingText}
+        </>
+      ) : (
+        <>
+          {icon && <span className="mr-2">{icon}</span>}
+          {children}
+        </>
+      )}
+    </button>
+  );
+};
+
 const QRCodeGenerator = () => {
   const [text, setText] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
@@ -35,14 +86,21 @@ const QRCodeGenerator = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDownloadingZip, setIsDownloadingZip] = useState(false);
-  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [isGeneratingSingle, setIsGeneratingSingle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showFileGuide, setShowFileGuide] = useState(false);
   const [contentType, setContentType] = useState<ContentType>('text');
   const [fileFormat, setFileFormat] = useState<FileFormat>('png');
   const [useContentAsFilename, setUseContentAsFilename] = useState<boolean>(false);
-  const [uploadedItemsCount, setUploadedItemsCount] = useState<number>(0);
+  const [uploadedItemsCount, setUploadedItemsCount] = useState<{
+    batch: number;
+    'yandex-ultima': number;
+  }>({
+    batch: 0,
+    'yandex-ultima': 0
+  });
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const [hasNewEntries, setHasNewEntries] = useState<boolean>(true);
 
   const formatContentByType = (content: string, type: ContentType): string => {
     switch (type) {
@@ -113,6 +171,7 @@ const QRCodeGenerator = () => {
 
   const addBatchEntry = () => {
     setBatchEntries([...batchEntries, { content: '', type: 'text' }]);
+    setHasNewEntries(true);
   };
 
   const removeBatchEntry = (index: number) => {
@@ -131,6 +190,7 @@ const QRCodeGenerator = () => {
       newEntries[index].content = value;
     }
     setBatchEntries(newEntries);
+    setHasNewEntries(true);
   };
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -139,6 +199,7 @@ const QRCodeGenerator = () => {
 
     setIsUploading(true);
     setError('');
+    setHasNewEntries(true);
 
     // Check file extension
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
@@ -187,7 +248,10 @@ const QRCodeGenerator = () => {
           }));
           
           setBatchEntries(newEntries);
-          setUploadedItemsCount(contentRows.length);
+          setUploadedItemsCount(prev => ({
+            ...prev,
+            [mode]: contentRows.length
+          }));
           setIsUploading(false);
           
         } catch (err) {
@@ -204,7 +268,7 @@ const QRCodeGenerator = () => {
       
       reader.readAsArrayBuffer(file);
     } else if (fileExtension === 'txt') {
-      // Handle text file (existing code)
+      // Handle text file
       const reader = new FileReader();
       
       reader.onload = (event) => {
@@ -226,18 +290,16 @@ const QRCodeGenerator = () => {
           }
           
           // Process lines from file
-          const newEntries: BatchEntry[] = [];
-          
-          for (const line of lines) {
-            // Default - treat as regular text
-            newEntries.push({
-              content: line.trim(),
-              type: 'text'
-            });
-          }
+          const newEntries: BatchEntry[] = lines.map(line => ({
+            content: line.trim(),
+            type: 'text'
+          }));
           
           setBatchEntries(newEntries);
-          setUploadedItemsCount(lines.length);
+          setUploadedItemsCount(prev => ({
+            ...prev,
+            [mode]: lines.length
+          }));
           setIsUploading(false);
           
         } catch (err) {
@@ -282,6 +344,7 @@ const QRCodeGenerator = () => {
 
       setError('');
       setIsGenerating(true);
+      setHasNewEntries(false);
       
       // Generate QR codes for each entry
       const batchResults: BatchQRCode[] = [];
@@ -314,6 +377,11 @@ const QRCodeGenerator = () => {
       
       setBatchCodes(batchResults);
       setIsGenerating(false);
+
+      // Scroll to results after a short delay to ensure rendering is complete
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     } catch (err) {
       console.error('Error generating batch QR codes:', err);
       setError('Failed to generate batch QR codes');
@@ -358,23 +426,6 @@ const QRCodeGenerator = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const downloadAllQRCodes = () => {
-    if (!batchCodes.length) return;
-    
-    setIsDownloadingAll(true);
-    
-    try {
-      for (const code of batchCodes) {
-        downloadBatchQRCode(code.dataUrl, code.content, code.type);
-      }
-    } finally {
-      // Use setTimeout to ensure the UI updates before the state change
-      setTimeout(() => {
-        setIsDownloadingAll(false);
-      }, 500);
-    }
   };
 
   const downloadAllQRCodesAsZip = async () => {
@@ -496,6 +547,10 @@ const QRCodeGenerator = () => {
     setError('');
     setBatchCodes([]);
     setQrCodeUrl('');
+    setUploadedItemsCount({
+      batch: 0,
+      'yandex-ultima': 0
+    });
     
     // Reset batch entries when switching to batch mode
     if (newMode === 'batch' || newMode === 'yandex-ultima') {
@@ -556,11 +611,30 @@ const QRCodeGenerator = () => {
     setBatchEntries([{ content: '', type: 'text' }]);
     setBatchCodes([]);
     setError('');
-    setUploadedItemsCount(0);
+    setUploadedItemsCount({
+      batch: 0,
+      'yandex-ultima': 0
+    });
+    setHasNewEntries(true);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
+  const generateIcon = (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zm8-12a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2V5h1v1h-1zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3zm2 2v-1h1v1h-1z" clipRule="evenodd" />
+    </svg>
+  );
+
+  const clearIcon = (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+    </svg>
+  );
+
   return (
-    <div className="w-full max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
+    <div className="w-full max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md font-['Helvetica']">
       {error && (
         <div className="mb-4 px-4 py-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
@@ -625,31 +699,19 @@ const QRCodeGenerator = () => {
                     </p>
                   </div>
                 )}
+
+                <div className="flex justify-center mt-4 pt-4 border-t border-gray-100">
+                  <LoadingButton
+                    onClick={generateQRCode}
+                    isLoading={isGeneratingSingle}
+                    icon={generateIcon}
+                    loadingText="Generating..."
+                  >
+                    Generate QR Code
+                  </LoadingButton>
+                </div>
               </div>
             </div>
-            
-            <button
-              onClick={generateQRCode}
-              className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm mb-5 font-medium text-sm flex items-center justify-center"
-              disabled={isGeneratingSingle}
-            >
-              {isGeneratingSingle ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zm8-12a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2V5h1v1h-1zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3zm2 2v-1h1v1h-1z" clipRule="evenodd" />
-                  </svg>
-                  Generate QR Code
-                </>
-              )}
-            </button>
             
             <div className="flex flex-col items-center">
               <div className="border border-gray-200 rounded-lg p-4 mb-4 bg-white shadow-sm max-w-xs mx-auto">
@@ -659,12 +721,12 @@ const QRCodeGenerator = () => {
                     <canvas ref={canvasRef} className="hidden" />
                   </div>
                 ) : (
-                  <div className="p-4 flex flex-col items-center justify-center text-gray-400 h-40 w-40">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v14a2 2 0 01-2 2z" />
+                  <div className="p-4 flex flex-col items-center justify-center text-gray-400 h-40 w-40 text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mb-2" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm6-2a1 1 0 11-2 0 1 1 0 012 0zm-.464 5.535a1 1 0 10-1.415-1.414 3 3 0 01-4.242 0 1 1 0 00-1.415 1.414 5 5 0 007.072 0z" clipRule="evenodd" />
                     </svg>
                     <canvas ref={canvasRef} className="hidden" />
-                    <p className="text-xs">QR code will appear here</p>
+                    <span className="text-xs">QR code will appear here</span>
                   </div>
                 )}
               </div>
@@ -720,9 +782,10 @@ const QRCodeGenerator = () => {
         ) : (
           <>
             {/* Batch Mode or Yandex Ultima Mode */}
-            <div className="mb-5">
-              <div className="space-y-4 border border-gray-200 rounded-lg p-5 bg-white shadow-sm">
-                <div className="flex items-center justify-between">
+            <div className="space-y-4">
+              {/* Input and Controls Section */}
+              <div className="border border-gray-200 rounded-lg p-5 bg-white shadow-sm">
+                <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-base font-medium text-gray-800">
                       {mode === 'batch' ? 'Batch QR Code Generator' : 'Yandex Ultima QR Code Generator'}
@@ -742,7 +805,7 @@ const QRCodeGenerator = () => {
                       disabled={isUploading}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                        <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 001.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
                       </svg>
                       {isUploading ? 'Uploading...' : 'Upload File'}
                     </button>
@@ -759,24 +822,20 @@ const QRCodeGenerator = () => {
                 </div>
 
                 {mode === 'yandex-ultima' && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-start space-x-2">
-                    <svg className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-2 mb-2 flex items-start space-x-2">
+                    <svg className="h-3.5 w-3.5 text-blue-500 mt-0.5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                     </svg>
-                    <div>
-                      <p className="text-xs text-blue-700 font-medium mb-1">URL Format:</p>
-                      <code className="text-xs bg-white px-2 py-1 rounded border border-blue-100 text-blue-800 block">
+                    <div className="min-w-0">
+                      <code className="text-[11px] bg-white px-1.5 py-0.5 rounded border border-blue-100 text-blue-800 block truncate">
                         https://8jxm.adj.st/addpromocode?adj_t=rf7a0p4_8cgc7kg&ref=qr&code=*promocode*
                       </code>
-                      <p className="text-xs text-blue-600 mt-1">
-                        Your promocode will replace <span className="font-medium">*promocode*</span> in the URL
-                      </p>
                     </div>
                   </div>
                 )}
-                
+
                 {showFileGuide && (
-                  <div className="bg-blue-50 p-3 rounded-md text-xs text-blue-800 border border-blue-100">
+                  <div className="bg-blue-50 p-3 rounded-md text-xs text-blue-800 border border-blue-100 mb-4">
                     <p className="font-medium mb-1 flex items-center">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
@@ -800,19 +859,18 @@ const QRCodeGenerator = () => {
                     </ul>
                   </div>
                 )}
-                
-                {/* File upload counter */}
-                {uploadedItemsCount > 0 && (
-                  <div className="bg-green-50 p-2 rounded-md text-xs text-green-700 border border-green-100 flex items-center">
+
+                {uploadedItemsCount[mode] > 0 && (mode === 'batch' || mode === 'yandex-ultima') && (
+                  <div className="bg-green-50 p-2 rounded-md text-xs text-green-700 border border-green-100 flex items-center mb-4">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707a1 1 0 00-1.414-1.414l-3 3a1 1 0 001.414 1.414l3-3a1 1 0 00-1.414-1.414z" clipRule="evenodd" />
                     </svg>
-                    <span>Successfully uploaded <strong>{uploadedItemsCount}</strong> items from file</span>
+                    <span>Successfully uploaded <strong>{uploadedItemsCount[mode]}</strong> items from file</span>
                   </div>
                 )}
-                
+
                 {/* Batch entries list */}
-                <div className="space-y-2 mt-4">
+                <div className="space-y-2">
                   {batchEntries.map((entry, index) => (
                     <div key={index} className="flex items-center space-x-2">
                       <input
@@ -836,155 +894,110 @@ const QRCodeGenerator = () => {
                     </div>
                   ))}
                 </div>
-                
-                {/* Add more / Generate buttons */}
-                <div className="flex justify-between pt-2">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={addBatchEntry}
-                      className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center font-medium"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-                      </svg>
-                      Add More Entries
-                    </button>
-                    {batchCodes.length > 0 && (
-                      <button
-                        onClick={resetBatchQR}
-                        className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center font-medium"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                        Clear All
-                      </button>
-                    )}
-                  </div>
+
+                {/* Controls - Always with the input section */}
+                <div className="flex justify-between mt-4 pt-4 border-t border-gray-100">
                   <button
-                    onClick={generateBatchQRCodes}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center shadow-sm font-medium"
-                    disabled={isGenerating}
+                    onClick={addBatchEntry}
+                    className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center font-medium"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zm8-12a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2V5h1v1h-1zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3zm2 2v-1h1v1h-1z" clipRule="evenodd" />
+                      <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
                     </svg>
-                    {isGenerating ? 'Generating...' : 'Generate All QR Codes'}
+                    Add More Entries
                   </button>
+                  <LoadingButton
+                    onClick={hasNewEntries ? generateBatchQRCodes : resetBatchQR}
+                    isLoading={isGenerating}
+                    variant={hasNewEntries ? 'primary' : 'danger'}
+                    icon={hasNewEntries ? generateIcon : clearIcon}
+                    loadingText={hasNewEntries ? "Generating QR Codes..." : "Clearing..."}
+                  >
+                    {batchCodes.length === 0 ? 'Generate all' : (hasNewEntries ? 'Generate Some More' : 'Clear All')}
+                  </LoadingButton>
                 </div>
               </div>
-            </div>
-            
-            {/* Batch results */}
-            {batchCodes.length > 0 && (
-              <div className="flex flex-col space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
-                      <label className="text-xs text-gray-600">File format:</label>
-                      <select 
-                        value={fileFormat} 
-                        onChange={(e) => setFileFormat(e.target.value as FileFormat)}
-                        className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="png">PNG</option>
-                        <option value="eps">EPS</option>
-                      </select>
-                    </div>
-                    {mode !== 'yandex-ultima' && (
+
+              {/* Results Section */}
+              {batchCodes.length > 0 && (
+                <div ref={resultsRef} className="flex flex-col space-y-4 border border-gray-200 rounded-lg p-5 bg-white shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
                       <div className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          id="batch-use-content-filename"
-                          checked={useContentAsFilename}
-                          onChange={(e) => setUseContentAsFilename(e.target.checked)}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <label htmlFor="batch-use-content-filename" className="text-xs text-gray-600">
-                          Use content as filename
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={downloadAllQRCodes}
-                      className="bg-gray-800 text-white py-2 px-4 rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center"
-                      disabled={isDownloadingAll}
-                    >
-                      {isDownloadingAll ? (
-                        <>
-                          <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Downloading...
-                        </>
-                      ) : (
-                        <>
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                          </svg>
-                          Download All
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={downloadAllQRCodesAsZip}
-                      className="bg-gray-800 text-white py-2 px-4 rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center"
-                      disabled={isDownloadingZip}
-                    >
-                      {isDownloadingZip ? (
-                        <>
-                          <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Creating ZIP...
-                        </>
-                      ) : (
-                        <>
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-                          </svg>
-                          Download ZIP
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {batchCodes.map((code, index) => (
-                    <div key={index} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                      <div className="flex flex-col items-center space-y-3">
-                        <img src={code.dataUrl} alt={`QR Code ${index + 1}`} className="w-32 h-32" />
-                        <div className="text-sm text-gray-600 text-center break-all">
-                          {mode === 'yandex-ultima' ? code.content : code.formattedContent}
-                        </div>
-                        <button
-                          onClick={() => downloadBatchQRCode(code.dataUrl, code.content, code.type)}
-                          className="bg-gray-800 text-white py-2 px-4 rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center"
+                        <label className="text-xs text-gray-600">File format:</label>
+                        <select 
+                          value={fileFormat} 
+                          onChange={(e) => setFileFormat(e.target.value as FileFormat)}
+                          className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                          </svg>
-                          Download
-                        </button>
+                          <option value="png">PNG</option>
+                          <option value="eps">EPS</option>
+                        </select>
                       </div>
+                      {mode !== 'yandex-ultima' && (
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="batch-use-content-filename"
+                            checked={useContentAsFilename}
+                            onChange={(e) => setUseContentAsFilename(e.target.checked)}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <label htmlFor="batch-use-content-filename" className="text-xs text-gray-600">
+                            Use content as filename
+                          </label>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={downloadAllQRCodesAsZip}
+                        className="bg-gray-800 text-white py-2 px-4 rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center"
+                        disabled={isDownloadingZip}
+                      >
+                        {isDownloadingZip ? (
+                          <>
+                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Creating ZIP...
+                          </>
+                        ) : (
+                          <>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                            Download all
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {batchCodes.map((code, index) => (
+                      <div key={index} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                        <div className="flex flex-col items-center space-y-3">
+                          <img src={code.dataUrl} alt={`QR Code ${index + 1}`} className="w-32 h-32" />
+                          <div className="text-sm text-gray-600 text-center break-all">
+                            {mode === 'yandex-ultima' ? code.content : code.formattedContent}
+                          </div>
+                          <button
+                            onClick={() => downloadBatchQRCode(code.dataUrl, code.content, code.type)}
+                            className="bg-gray-800 text-white py-2 px-4 rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <button
-                  onClick={() => setBatchCodes([])}
-                  className="bg-blue-100 text-blue-700 py-2 px-4 rounded-lg hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 text-sm flex items-center self-start"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                  </svg>
-                  Create New Batch
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </>
