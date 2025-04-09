@@ -1,15 +1,12 @@
 'use client';
 
-import React, { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, ChangeEvent } from 'react';
 import QRCode from 'qrcode';
-import { saveAs } from 'file-saver';
-import { toPng } from 'html-to-image';
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
-import Image from 'next/image';
 
 // Define content type options
-type ContentType = 'text' | 'url' | 'email' | 'phone' | 'wifi';
+type ContentType = 'text' | 'url' | 'email' | 'phone' | 'sms' | 'wifi';
 // Define file format options
 type FileFormat = 'png' | 'eps';
 // Define mode options
@@ -28,42 +25,48 @@ interface BatchQRCode {
 }
 
 const QRCodeGenerator = () => {
-  const [content, setContent] = useState('');
-  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isGeneratingSingle, setIsGeneratingSingle] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
-  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
-  const [mode, setMode] = useState<Mode>('single');
-  const [fileFormat, setFileFormat] = useState<'png' | 'eps'>('png');
-  const [batchEntries, setBatchEntries] = useState<BatchEntry[]>([]);
-  const [batchCodes, setBatchCodes] = useState<BatchQRCode[]>([]);
-  const [uploadedItemsCount, setUploadedItemsCount] = useState<number>(0);
+  const [text, setText] = useState('');
+  const [qrCodeUrl, setQrCodeUrl] = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [showYandexMode, setShowYandexMode] = useState(false);
+  const [error, setError] = useState('');
+  const [mode, setMode] = useState<Mode>('single');
+  const [batchCodes, setBatchCodes] = useState<BatchQRCode[]>([]);
+  const [batchEntries, setBatchEntries] = useState<BatchEntry[]>([{ content: '', type: 'text' }]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [isGeneratingSingle, setIsGeneratingSingle] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showFileGuide, setShowFileGuide] = useState(false);
   const [contentType, setContentType] = useState<ContentType>('text');
   const [detectedType, setDetectedType] = useState<string | null>(null);
+  const [fileFormat, setFileFormat] = useState<FileFormat>('png');
   const [useContentAsFilename, setUseContentAsFilename] = useState<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showYandexMode, setShowYandexMode] = useState<boolean>(false);
+  const [uploadedItemsCount, setUploadedItemsCount] = useState<number>(0);
 
   const formatContentByType = (content: string, type: ContentType): string => {
     switch (type) {
       case 'url':
-        return content.match(/^https?:\/\//i) ? content : `https://${content}`;
+        // Add https:// if not present and not starting with http:// already
+        if (!content.match(/^https?:\/\//i)) {
+          return `https://${content}`;
+        }
+        return content;
       case 'email':
-        return content.startsWith('mailto:') ? content : `mailto:${content}`;
+        return `mailto:${content}`;
       case 'phone':
-        return content.startsWith('tel:') ? content : `tel:${content}`;
+        return `tel:${content}`;
+      case 'sms':
+        return `sms:${content}`;
       case 'wifi':
+        // Format: WIFI:T:WPA;S:SSID;P:password;;
         try {
-          // If it's already a JSON string, parse and re-stringify to ensure proper format
-          const wifiData = typeof content === 'string' ? JSON.parse(content) : content;
-          return JSON.stringify(wifiData);
+          const wifiData = JSON.parse(content);
+          return `WIFI:T:${wifiData.encryption || 'WPA'};S:${wifiData.ssid || ''};P:${wifiData.password || ''};;`;
         } catch {
-          // If parsing fails, return as is
+          // If not valid JSON, assume it's already formatted or just text
           return content;
         }
       default:
@@ -71,127 +74,47 @@ const QRCodeGenerator = () => {
     }
   };
 
-  const addUniqueCodeToContent = (content: string): string => {
-    const uniqueCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return `${content}?code=${uniqueCode}`;
+  const addUniqueCodeToContent = (content: string, type: ContentType): string => {
+    // No longer adding tracking codes, just return the content as is
+    return content;
   };
 
-  const detectContentType = (content: string): ContentType => {
-    // If it looks like a URL
-    if (content.match(/^(https?:\/\/|www\.)/i)) {
-      return 'url';
-    }
-    
-    // If it looks like an email
-    if (content.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-      return 'email';
-    }
-    
-    // If it looks like a phone number
-    if (content.match(/^\+?[0-9\s\(\)\-]{8,20}$/)) {
-      return 'phone';
-    }
-    
-    // If it looks like JSON (for WiFi)
-    if ((content.startsWith('{') && content.endsWith('}')) &&
-        content.includes('ssid')) {
-      return 'wifi';
-    }
-    
-    // Default to text
-    return 'text';
-  };
-
-  const generateQRCode = async (content: string, type: ContentType = 'text'): Promise<string> => {
+  const generateQRCode = async () => {
     try {
-      let formattedContent = content;
+      let contentToEncode = '';
+      
+      // For all content types
+      if (!text) {
+        setError('Please enter some content');
+        return;
+      }
+      contentToEncode = text;
+      
+      setError('');
+      setIsGeneratingSingle(true);
       
       // Apply content type formatting
-      formattedContent = formatContentByType(formattedContent, type);
+      const formattedContent = formatContentByType(contentToEncode, contentType);
       
       // Generate QR code on canvas
-      const canvas = document.createElement('canvas');
-      await QRCode.toCanvas(canvas, formattedContent, {
-        width: 800,
-        margin: 1,
-        color: {
-          dark: '#000000',
-          light: '#ffffff'
-        }
-      });
+      if (canvasRef.current) {
+        await QRCode.toCanvas(canvasRef.current, formattedContent, {
+          width: 200,
+          margin: 2
+        });
+      }
       
-      // Convert canvas to data URL
-      const dataUrl = canvas.toDataURL('image/png');
-      return dataUrl;
+      // Generate data URL for download
+      const url = await QRCode.toDataURL(formattedContent, {
+        width: 800,
+        margin: 2
+      });
+      setQrCodeUrl(url);
+      setIsGeneratingSingle(false);
     } catch (err) {
       console.error('Error generating QR code:', err);
-      throw err;
-    }
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const fileExtension = file.name.split('.').pop()?.toLowerCase();
-      
-      if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-        const reader = new FileReader();
-        reader.onload = async (e: ProgressEvent<FileReader>) => {
-          try {
-            const data = new Uint8Array(e.target?.result as ArrayBuffer);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-            
-            // Filter out empty rows and get content from first column
-            const validEntries = jsonData
-              .filter((row: unknown) => Array.isArray(row) && row.length > 0 && row[0])
-              .map((row: unknown) => {
-                if (Array.isArray(row) && row[0]) {
-                  return { content: String(row[0]), type: 'text' as ContentType };
-                }
-                return null;
-              })
-              .filter((entry): entry is BatchEntry => entry !== null);
-
-            if (validEntries.length === 0) {
-              setError('No valid content found in the Excel file');
-              return;
-            }
-
-            setBatchEntries(validEntries);
-            setUploadedItemsCount(validEntries.length);
-          } catch (error) {
-            setError('Error reading Excel file');
-            console.error('Excel parsing error:', error);
-          }
-        };
-        reader.readAsArrayBuffer(file);
-      } else if (fileExtension === 'txt') {
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-        
-        if (lines.length === 0) {
-          setError('File is empty');
-          return;
-        }
-
-        const entries = lines.map(line => ({
-          content: line.trim(),
-          type: 'text' as ContentType
-        }));
-
-        setBatchEntries(entries);
-        setUploadedItemsCount(entries.length);
-      } else {
-        setError('Unsupported file format. Please upload a .txt or .xlsx file');
-      }
-    } catch (error) {
-      setError('Error reading file');
-      console.error('File reading error:', error);
+      setError('Failed to generate QR code');
+      setIsGeneratingSingle(false);
     }
   };
 
@@ -215,6 +138,138 @@ const QRCodeGenerator = () => {
       newEntries[index].content = value;
     }
     setBatchEntries(newEntries);
+  };
+
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setError('');
+
+    // Check file extension
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+      // Handle Excel file
+      const reader = new FileReader();
+      
+      reader.onload = (event) => {
+        try {
+          const data = event.target?.result;
+          if (!data) {
+            setError('File appears to be empty');
+            setIsUploading(false);
+            return;
+          }
+          
+          // Parse Excel file
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          
+          // Convert to JSON
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          
+          // Filter out empty rows and extract content
+          const contentRows = jsonData
+            .filter((row: any) => row && row.length > 0 && row[0])
+            .map((row: any) => row[0].toString().trim());
+          
+          if (contentRows.length === 0) {
+            setError('No content found in Excel file');
+            setIsUploading(false);
+            return;
+          }
+          
+          // Create batch entries from Excel data
+          const newEntries: BatchEntry[] = contentRows.map(content => ({
+            content,
+            type: 'text'
+          }));
+          
+          setBatchEntries(newEntries);
+          setUploadedItemsCount(contentRows.length);
+          setIsUploading(false);
+          
+        } catch (err) {
+          console.error('Error reading Excel file:', err);
+          setError('Failed to read Excel file');
+          setIsUploading(false);
+        }
+      };
+      
+      reader.onerror = () => {
+        setError('Error reading Excel file');
+        setIsUploading(false);
+      };
+      
+      reader.readAsArrayBuffer(file);
+    } else if (fileExtension === 'txt') {
+      // Handle text file (existing code)
+      const reader = new FileReader();
+      
+      reader.onload = (event) => {
+        try {
+          const content = event.target?.result as string;
+          if (!content) {
+            setError('File appears to be empty');
+            setIsUploading(false);
+            return;
+          }
+          
+          // Split by newlines and filter empty lines
+          const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
+          
+          if (lines.length === 0) {
+            setError('No content found in file');
+            setIsUploading(false);
+            return;
+          }
+          
+          // Process lines from file
+          const newEntries: BatchEntry[] = [];
+          
+          for (const line of lines) {
+            // Default - treat as regular text
+            newEntries.push({
+              content: line.trim(),
+              type: 'text'
+            });
+          }
+          
+          setBatchEntries(newEntries);
+          setUploadedItemsCount(lines.length);
+          setIsUploading(false);
+          
+        } catch (err) {
+          console.error('Error reading file:', err);
+          setError('Failed to read file');
+          setIsUploading(false);
+        }
+      };
+      
+      reader.onerror = () => {
+        setError('Error reading file');
+        setIsUploading(false);
+      };
+      
+      reader.readAsText(file);
+    } else {
+      setError('Unsupported file format. Please upload a .txt or .xlsx file.');
+      setIsUploading(false);
+    }
+    
+    // Reset the file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const triggerFileUpload = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
   };
 
   const generateBatchQRCodes = async () => {
@@ -260,7 +315,6 @@ const QRCodeGenerator = () => {
       }
       
       setBatchCodes(batchResults);
-      setError('');
       setIsGenerating(false);
     } catch (err) {
       console.error('Error generating batch QR codes:', err);
@@ -269,69 +323,23 @@ const QRCodeGenerator = () => {
     }
   };
 
-  const downloadQRCode = async () => {
+  const downloadQRCode = () => {
     if (!qrCodeUrl) return;
     
-    try {
-      if (fileFormat === 'png') {
-        // For PNG, we can use the dataUrl directly
-        const link = document.createElement('a');
-        link.href = qrCodeUrl;
-        
-        // Use content as filename if enabled, otherwise use default name
-        if (useContentAsFilename && content) {
-          const sanitizedContent = content.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 30);
-          link.download = `${sanitizedContent}.${fileFormat}`;
-        } else {
-          link.download = `qr-code.${fileFormat}`;
-        }
-        
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        // For EPS format, we need to convert the PNG to EPS
-        const img = document.createElement('img');
-        img.src = qrCodeUrl;
-        await new Promise((resolve) => {
-          img.onload = resolve;
-        });
-        
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0);
-        
-        const epsData = await toPng(canvas, {
-          quality: 1.0,
-          pixelRatio: 2,
-          skipFonts: true,
-          style: {
-            transform: 'scale(1)',
-            transformOrigin: 'top left'
-          }
-        });
-        
-        const link = document.createElement('a');
-        link.href = epsData;
-        
-        // Use content as filename if enabled, otherwise use default name
-        if (useContentAsFilename && content) {
-          const sanitizedContent = content.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 30);
-          link.download = `${sanitizedContent}.${fileFormat}`;
-        } else {
-          link.download = `qr-code.${fileFormat}`;
-        }
-        
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
-    } catch (error) {
-      console.error('Error downloading QR code:', error);
-      setError('Failed to download QR code');
+    const link = document.createElement('a');
+    link.href = qrCodeUrl;
+    
+    // Use content as filename if enabled, otherwise use default name
+    if (useContentAsFilename && text) {
+      const sanitizedContent = text.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 30);
+      link.download = `${sanitizedContent}.${fileFormat}`;
+    } else {
+      link.download = `qrcode.${fileFormat}`;
     }
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const downloadBatchQRCode = (dataUrl: string, content: string, type: ContentType) => {
@@ -354,69 +362,90 @@ const QRCodeGenerator = () => {
     document.body.removeChild(link);
   };
 
-  const downloadAllQRCodes = async () => {
+  const downloadAllQRCodes = () => {
     if (!batchCodes.length) return;
     
     setIsDownloadingAll(true);
-    setError('Downloading all QR codes...');
-
+    
     try {
       for (const code of batchCodes) {
         downloadBatchQRCode(code.dataUrl, code.content, code.type);
       }
     } finally {
-      setError('');
-      setIsDownloadingAll(false);
+      // Use setTimeout to ensure the UI updates before the state change
+      setTimeout(() => {
+        setIsDownloadingAll(false);
+      }, 500);
     }
   };
 
   const downloadAllQRCodesAsZip = async () => {
     if (!batchCodes.length) return;
-    
-    setIsDownloadingZip(true);
-    setError('Creating zip file...');
 
     try {
+      setIsDownloadingZip(true);
       const zip = new JSZip();
-      const promises = batchCodes.map(async (code, index) => {
-        const filename = useContentAsFilename && code.content
-          ? `${code.content.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 30)}.${fileFormat}`
-          : `qr-code-${index + 1}.${fileFormat}`;
+
+      for (const code of batchCodes) {
+        // Create a filename based on the useContentAsFilename setting
+        let filename;
+        
+        if (useContentAsFilename || mode === 'yandex-ultima') {
+          // Use content directly as filename
+          const sanitizedContent = code.content
+            .replace(/[^a-z0-9]/gi, '_')
+            .toLowerCase()
+            .slice(0, 30);
+          
+          filename = `${sanitizedContent}.${fileFormat}`;
+        } else {
+          // Use the default naming convention
+          const sanitizedContent = code.formattedContent
+            .replace(/[^a-z0-9]/gi, '_')
+            .toLowerCase()
+            .slice(0, 30);
+          
+          filename = `${sanitizedContent}_${code.type}.${fileFormat}`;
+        }
 
         if (fileFormat === 'png') {
-          zip.file(filename, code.dataUrl.split(',')[1], { base64: true });
-        } else {
-          // For EPS format, we need to convert the PNG to EPS
-          const img = document.createElement('img');
-          img.src = code.dataUrl;
-          await new Promise((resolve) => {
-            img.onload = resolve;
-          });
-          
+          // For PNG, we can use the dataUrl directly
+          const base64Data = code.dataUrl.split(',')[1];
+          zip.file(filename, base64Data, { base64: true });
+        } else if (fileFormat === 'eps') {
+          // For EPS, we need to convert the PNG to EPS
+          // Create a temporary canvas to draw the QR code
           const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
           const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0);
+          const img = new Image();
           
-          const epsData = await toPng(canvas, {
-            quality: 1.0,
-            pixelRatio: 2,
-            skipFonts: true,
-            style: {
-              transform: 'scale(1)',
-              transformOrigin: 'top left'
-            }
+          await new Promise((resolve, reject) => {
+            img.onload = () => {
+              canvas.width = img.width;
+              canvas.height = img.height;
+              ctx?.drawImage(img, 0, 0);
+              resolve(null);
+            };
+            img.onerror = reject;
+            img.src = code.dataUrl;
           });
-          
-          zip.file(filename, epsData.split(',')[1], { base64: true });
-        }
-      });
 
-      await Promise.all(promises);
+          // Convert canvas to EPS
+          const epsContent = await convertCanvasToEPS(canvas);
+          zip.file(filename, epsContent);
+        }
+      }
+
+      // Generate and download the zip file
       const content = await zip.generateAsync({ type: 'blob' });
-      saveAs(content, 'qr-codes.zip');
-      setError('');
+      const url = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'qr_codes.zip';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error creating zip file:', error);
       setError('Failed to create zip file');
@@ -425,11 +454,50 @@ const QRCodeGenerator = () => {
     }
   };
 
+  const convertCanvasToEPS = async (canvas: HTMLCanvasElement): Promise<string> => {
+    // This is a basic EPS conversion that creates a simple EPS file
+    // For a production environment, you might want to use a more robust conversion library
+    const width = canvas.width;
+    const height = canvas.height;
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx?.getImageData(0, 0, width, height);
+    
+    if (!imageData) {
+      throw new Error('Failed to get image data');
+    }
+
+    let eps = '%!PS-Adobe-3.0 EPSF-3.0\n';
+    eps += `%%BoundingBox: 0 0 ${width} ${height}\n`;
+    eps += '/scanline { % x y scanline\n';
+    eps += '  /y exch def\n';
+    eps += '  /x exch def\n';
+    eps += '  x y moveto\n';
+    eps += '  x 1 add y lineto\n';
+    eps += '  stroke\n';
+    eps += '} def\n';
+    eps += '0.5 setlinewidth\n';
+    eps += '0 setgray\n';
+
+    // Convert image data to EPS
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const alpha = imageData.data[i + 3];
+        if (alpha > 128) { // If pixel is not transparent
+          eps += `${x} ${height - y} scanline\n`;
+        }
+      }
+    }
+
+    eps += 'showpage\n';
+    return eps;
+  };
+
   const toggleMode = (newMode: Mode) => {
     setMode(newMode);
     setError('');
     setBatchCodes([]);
-    setQrCodeUrl(null);
+    setQrCodeUrl('');
     
     // Reset batch entries when switching to batch mode
     if (newMode === 'batch' || newMode === 'yandex-ultima') {
@@ -438,11 +506,12 @@ const QRCodeGenerator = () => {
   };
 
   // Helper function to get type label
-  const getContentTypeLabel = (type: ContentType): string => {
+  const getTypeLabel = (type: ContentType): string => {
     switch (type) {
       case 'url': return 'URL';
       case 'email': return 'Email';
       case 'phone': return 'Phone';
+      case 'sms': return 'SMS';
       case 'wifi': return 'WiFi';
       default: return 'Text';
     }
@@ -452,15 +521,42 @@ const QRCodeGenerator = () => {
     setShowFileGuide(!showFileGuide);
   };
 
+  // New function to auto-detect content type
+  const detectContentType = (content: string): ContentType => {
+    // If it looks like a URL
+    if (content.match(/^(https?:\/\/|www\.)/i)) {
+      return 'url';
+    }
+    
+    // If it looks like an email
+    if (content.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      return 'email';
+    }
+    
+    // If it looks like a phone number
+    if (content.match(/^\+?[0-9\s\(\)\-]{8,20}$/)) {
+      return 'phone';
+    }
+    
+    // If it looks like JSON (for WiFi)
+    if ((content.startsWith('{') && content.endsWith('}')) &&
+        content.includes('ssid')) {
+      return 'wifi';
+    }
+    
+    // Default to text
+    return 'text';
+  };
+
   // Add handler for text input that auto-detects type
   const handleTextChange = (e: ChangeEvent<HTMLInputElement>) => {
     const inputValue = e.target.value;
-    setContent(inputValue);
+    setText(inputValue);
     
     // Only auto-detect if there's content
     if (inputValue.trim()) {
       const detected = detectContentType(inputValue);
-      setDetectedType(getContentTypeLabel(detected));
+      setDetectedType(getTypeLabel(detected));
       setContentType(detected);
     } else {
       setDetectedType(null);
@@ -468,8 +564,8 @@ const QRCodeGenerator = () => {
   };
 
   const resetSingleQR = () => {
-    setContent('');
-    setQrCodeUrl(null);
+    setText('');
+    setQrCodeUrl('');
     setError('');
   };
 
@@ -478,12 +574,6 @@ const QRCodeGenerator = () => {
     setBatchCodes([]);
     setError('');
     setUploadedItemsCount(0);
-  };
-
-  const triggerFileUpload = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
   };
 
   return (
@@ -533,7 +623,7 @@ const QRCodeGenerator = () => {
                   <input
                     type="text"
                     id="content-input"
-                    value={content}
+                    value={text}
                     onChange={handleTextChange}
                     placeholder="Enter content for QR code"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm transition-all"
@@ -547,7 +637,7 @@ const QRCodeGenerator = () => {
                         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                       </svg>
                       Preview: <span className="font-mono bg-gray-100 p-1 rounded ml-1 text-xs inline-block mt-1">
-                        {content.match(/^https?:\/\//i) ? content : `https://${content}`}
+                        {text.match(/^https?:\/\//i) ? text : `https://${text}`}
                       </span>
                     </p>
                   </div>
@@ -556,19 +646,25 @@ const QRCodeGenerator = () => {
             </div>
             
             <button
-              onClick={() => generateQRCode(content, contentType)}
+              onClick={generateQRCode}
               className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-sm mb-5 font-medium text-sm flex items-center justify-center"
+              disabled={isGeneratingSingle}
             >
               {isGeneratingSingle ? (
                 <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                   Generating...
                 </>
               ) : (
-                'Generate QR Code'
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zm8-12a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2V5h1v1h-1zm-2 7a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3zm2 2v-1h1v1h-1z" clipRule="evenodd" />
+                  </svg>
+                  Generate QR Code
+                </>
               )}
             </button>
             
@@ -576,15 +672,7 @@ const QRCodeGenerator = () => {
               <div className="border border-gray-200 rounded-lg p-4 mb-4 bg-white shadow-sm max-w-xs mx-auto">
                 {qrCodeUrl ? (
                   <div className="flex flex-col items-center">
-                    <div className="relative w-40 h-40">
-                      <Image 
-                        src={qrCodeUrl} 
-                        alt="Generated QR Code" 
-                        fill
-                        style={{ objectFit: 'contain' }}
-                        priority
-                      />
-                    </div>
+                    <img src={qrCodeUrl} alt="Generated QR Code" className="w-40 h-40" />
                     <canvas ref={canvasRef} className="hidden" />
                   </div>
                 ) : (
@@ -863,15 +951,7 @@ const QRCodeGenerator = () => {
                   {batchCodes.map((code, index) => (
                     <div key={index} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                       <div className="flex flex-col items-center space-y-3">
-                        <div className="relative w-32 h-32">
-                          <Image 
-                            src={code.dataUrl} 
-                            alt={`QR Code ${index + 1}`} 
-                            fill
-                            style={{ objectFit: 'contain' }}
-                            priority
-                          />
-                        </div>
+                        <img src={code.dataUrl} alt={`QR Code ${index + 1}`} className="w-32 h-32" />
                         <div className="text-sm text-gray-600 text-center break-all">
                           {mode === 'yandex-ultima' ? code.content : code.formattedContent}
                         </div>
