@@ -672,7 +672,13 @@ const QRCodeGenerator = () => {
               <div className="border border-gray-200 rounded-lg p-4 mb-4 bg-white shadow-sm max-w-xs mx-auto">
                 {qrCodeUrl ? (
                   <div className="flex flex-col items-center">
-                    <img src={qrCodeUrl} alt="Generated QR Code" className="w-40 h-40" />
+                    <img 
+                      src={qrCodeUrl} 
+                      alt="Generated QR Code" 
+                      className="w-40 h-40" 
+                      width={160} 
+                      height={160}
+                    />
                     <canvas ref={canvasRef} className="hidden" />
                   </div>
                 ) : (
@@ -951,7 +957,13 @@ const QRCodeGenerator = () => {
                   {batchCodes.map((code, index) => (
                     <div key={index} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                       <div className="flex flex-col items-center space-y-3">
-                        <img src={code.dataUrl} alt={`QR Code ${index + 1}`} className="w-32 h-32" />
+                        <img 
+                          src={code.dataUrl} 
+                          alt={`QR Code ${index + 1}`} 
+                          className="w-32 h-32" 
+                          width={128} 
+                          height={128}
+                        />
                         <div className="text-sm text-gray-600 text-center break-all">
                           {mode === 'yandex-ultima' ? code.content : code.formattedContent}
                         </div>
