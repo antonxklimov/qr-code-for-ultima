@@ -40,10 +40,8 @@ const QRCodeGenerator = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showFileGuide, setShowFileGuide] = useState(false);
   const [contentType, setContentType] = useState<ContentType>('text');
-  const [detectedType, setDetectedType] = useState<string | null>(null);
   const [fileFormat, setFileFormat] = useState<FileFormat>('png');
   const [useContentAsFilename, setUseContentAsFilename] = useState<boolean>(false);
-  const [showYandexMode, setShowYandexMode] = useState<boolean>(false);
   const [uploadedItemsCount, setUploadedItemsCount] = useState<number>(0);
 
   const formatContentByType = (content: string, type: ContentType): string => {
@@ -74,11 +72,6 @@ const QRCodeGenerator = () => {
     }
   };
 
-  const addUniqueCodeToContent = (content: string, type: ContentType): string => {
-    // No longer adding tracking codes, just return the content as is
-    return content;
-  };
-
   const generateQRCode = async () => {
     try {
       let contentToEncode = '';
@@ -99,7 +92,7 @@ const QRCodeGenerator = () => {
       // Generate QR code on canvas
       if (canvasRef.current) {
         await QRCode.toCanvas(canvasRef.current, formattedContent, {
-          width: 200,
+          width: 800,
           margin: 2
         });
       }
@@ -173,8 +166,13 @@ const QRCodeGenerator = () => {
           
           // Filter out empty rows and extract content
           const contentRows = jsonData
-            .filter((row: any) => row && row.length > 0 && row[0])
-            .map((row: any) => row[0].toString().trim());
+            .filter((row: unknown) => row && Array.isArray(row) && row.length > 0 && row[0])
+            .map((row: unknown) => {
+              if (Array.isArray(row) && row[0]) {
+                return row[0].toString().trim();
+              }
+              return '';
+            });
           
           if (contentRows.length === 0) {
             setError('No content found in Excel file');
@@ -556,10 +554,7 @@ const QRCodeGenerator = () => {
     // Only auto-detect if there's content
     if (inputValue.trim()) {
       const detected = detectContentType(inputValue);
-      setDetectedType(getTypeLabel(detected));
       setContentType(detected);
-    } else {
-      setDetectedType(null);
     }
   };
 
